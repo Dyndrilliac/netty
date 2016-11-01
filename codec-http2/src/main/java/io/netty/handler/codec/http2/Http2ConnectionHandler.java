@@ -25,7 +25,7 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.http2.Http2Exception.CompositeStreamException;
 import io.netty.handler.codec.http2.Http2Exception.StreamException;
 import io.netty.util.concurrent.ScheduledFuture;
-import io.netty.util.internal.OneTimeTask;
+import io.netty.util.internal.UnstableApi;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static io.netty.buffer.ByteBufUtil.hexDump;
+import static io.netty.buffer.Unpooled.EMPTY_BUFFER;
 import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_STREAM_ID;
 import static io.netty.handler.codec.http2.Http2CodecUtil.connectionPrefaceBuf;
 import static io.netty.handler.codec.http2.Http2CodecUtil.getEmbeddedHttp2Exception;
@@ -58,6 +59,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
  * This interface enforces inbound flow control functionality through
  * {@link Http2LocalFlowController}
  */
+@UnstableApi
 public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http2LifecycleManager,
                                                                             ChannelOutboundHandler {
 
@@ -97,7 +99,7 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
     public void gracefulShutdownTimeoutMillis(long gracefulShutdownTimeoutMillis) {
         if (gracefulShutdownTimeoutMillis < 0) {
             throw new IllegalArgumentException("gracefulShutdownTimeoutMillis: " + gracefulShutdownTimeoutMillis +
-                    " (expected: >= 0)");
+                                               " (expected: >= 0)");
         }
         this.gracefulShutdownTimeoutMillis = gracefulShutdownTimeoutMillis;
     }
@@ -262,11 +264,12 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
 
             // If the input so far doesn't match the preface, break the connection.
             if (bytesRead == 0 || !ByteBufUtil.equals(in, in.readerIndex(),
-                    clientPrefaceString, clientPrefaceString.readerIndex(), bytesRead)) {
+                                                      clientPrefaceString, clientPrefaceString.readerIndex(),
+                                                      bytesRead)) {
                 String receivedBytes = hexDump(in, in.readerIndex(),
-                        min(in.readableBytes(), clientPrefaceString.readableBytes()));
+                                               min(in.readableBytes(), clientPrefaceString.readableBytes()));
                 throw connectionError(PROTOCOL_ERROR, "HTTP/2 client preface string missing or corrupt. " +
-                        "Hex dump for received bytes: %s", receivedBytes);
+                                                      "Hex dump for received bytes: %s", receivedBytes);
             }
             in.skipBytes(bytesRead);
             clientPrefaceString.skipBytes(bytesRead);
@@ -298,7 +301,8 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
             short flags = in.getUnsignedByte(in.readerIndex() + 4);
             if (frameType != SETTINGS || (flags & Http2Flags.ACK) != 0) {
                 throw connectionError(PROTOCOL_ERROR, "First received frame was not SETTINGS. " +
-                        "Hex dump for first 5 bytes: %s", hexDump(in, in.readerIndex(), 5));
+                                                      "Hex dump for first 5 bytes: %s",
+                                      hexDump(in, in.readerIndex(), 5));
             }
             return true;
         }
@@ -409,25 +413,31 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
 
     @Override
     public void close(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
+        promise = promise.unvoid();
         // Avoid NotYetConnectedException
         if (!ctx.channel().isActive()) {
             ctx.close(promise);
             return;
         }
 
-        ChannelFuture future = goAway(ctx, null);
+        // If the user has already sent a GO_AWAY frame they may be attempting to do a graceful shutdown which requires
+        // sending multiple GO_AWAY frames. We should only send a GO_AWAY here if one has not already been sent. If
+        // a GO_AWAY has been sent we send a empty buffer just so we can wait to close until all other data has been
+        // flushed to the OS.
+        // https://github.com/netty/netty/issues/5307
+        final ChannelFuture future = connection().goAwaySent() ? ctx.write(EMPTY_BUFFER) : goAway(ctx, null);
         ctx.flush();
         doGracefulShutdown(ctx, future, promise);
     }
 
     private void doGracefulShutdown(ChannelHandlerContext ctx, ChannelFuture future, ChannelPromise promise) {
-        // If there are no active streams, close immediately after the send is complete.
-        // Otherwise wait until all streams are inactive.
         if (isGracefulShutdownComplete()) {
+            // If there are no active streams, close immediately after the GO_AWAY write completes.
             future.addListener(new ClosingChannelFutureListener(ctx, promise));
         } else {
+            // If there are active streams we should wait until they are all closed before closing the connection.
             closeListener = new ClosingChannelFutureListener(ctx, promise,
-                                        gracefulShutdownTimeoutMillis, MILLISECONDS);
+                                                             gracefulShutdownTimeoutMillis, MILLISECONDS);
         }
     }
 
@@ -597,15 +607,40 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
         return encoder().frameWriter();
     }
 
+    /**
+     * Sends a {@code RST_STREAM} frame even if we don't know about the stream. This error condition is most likely
+     * triggered by the first frame of a stream being invalid. That is, there was an error reading the frame before
+     * we could create a new stream.
+     */
+    private ChannelFuture resetUnknownStream(final ChannelHandlerContext ctx, int streamId, long errorCode,
+                                             ChannelPromise promise) {
+        ChannelFuture future = frameWriter().writeRstStream(ctx, streamId, errorCode, promise);
+        if (future.isDone()) {
+            closeConnectionOnError(ctx, future);
+        } else {
+            future.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    closeConnectionOnError(ctx, future);
+                }
+            });
+        }
+        return future;
+    }
+
     @Override
     public ChannelFuture resetStream(final ChannelHandlerContext ctx, int streamId, long errorCode,
-            final ChannelPromise promise) {
+                                     ChannelPromise promise) {
+        promise = promise.unvoid();
         final Http2Stream stream = connection().stream(streamId);
-        if (stream == null || stream.isResetSent()) {
-            // Don't write a RST_STREAM frame if we are not aware of the stream, or if we have already written one.
-            return promise.setSuccess();
+        if (stream == null) {
+            return resetUnknownStream(ctx, streamId, errorCode, promise);
         }
 
+        if (stream.isResetSent()) {
+            // Don't write a RST_STREAM frame if we have already written one.
+            return promise.setSuccess();
+        }
         final ChannelFuture future;
         if (stream.state() == IDLE) {
             // We cannot write RST_STREAM frames on IDLE streams https://tools.ietf.org/html/rfc7540#section-6.4.
@@ -636,13 +671,23 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
     public ChannelFuture goAway(final ChannelHandlerContext ctx, final int lastStreamId, final long errorCode,
                                 final ByteBuf debugData, ChannelPromise promise) {
         try {
+            promise = promise.unvoid();
             final Http2Connection connection = connection();
-            if (connection.goAwaySent() && lastStreamId > connection.remote().lastStreamKnownByPeer()) {
-                throw connectionError(PROTOCOL_ERROR, "Last stream identifier must not increase between " +
-                                                      "sending multiple GOAWAY frames (was '%d', is '%d').",
-                                                      connection.remote().lastStreamKnownByPeer(),
-                                                      lastStreamId);
+            if (connection().goAwaySent()) {
+                // Protect against re-entrancy. Could happen if writing the frame fails, and error handling
+                // treating this is a connection handler and doing a graceful shutdown...
+                if (lastStreamId == connection().remote().lastStreamKnownByPeer()) {
+                    // Release the data and notify the promise
+                    debugData.release();
+                    return promise.setSuccess();
+                }
+                if (lastStreamId > connection.remote().lastStreamKnownByPeer()) {
+                    throw connectionError(PROTOCOL_ERROR, "Last stream identifier must not increase between " +
+                                                          "sending multiple GOAWAY frames (was '%d', is '%d').",
+                                          connection.remote().lastStreamKnownByPeer(), lastStreamId);
+                }
             }
+
             connection.goAwaySent(lastStreamId, errorCode, debugData);
 
             // Need to retain before we write the buffer because if we do it after the refCnt could already be 0 and
@@ -707,6 +752,12 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
         }
     }
 
+    private void closeConnectionOnError(ChannelHandlerContext ctx, ChannelFuture future) {
+        if (!future.isSuccess()) {
+            onConnectionError(ctx, future.cause(), null);
+        }
+    }
+
     /**
      * Returns the client preface string if this is a client connection, otherwise returns {@code null}.
      */
@@ -715,7 +766,7 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
     }
 
     private static void processGoAwayWriteResult(final ChannelHandlerContext ctx, final int lastStreamId,
-            final long errorCode, final ByteBuf debugData, ChannelFuture future) {
+                                                 final long errorCode, final ByteBuf debugData, ChannelFuture future) {
         try {
             if (future.isSuccess()) {
                 if (errorCode != NO_ERROR.code()) {
@@ -758,7 +809,7 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
                                      long timeout, TimeUnit unit) {
             this.ctx = ctx;
             this.promise = promise;
-            timeoutTask = ctx.executor().schedule(new OneTimeTask() {
+            timeoutTask = ctx.executor().schedule(new Runnable() {
                 @Override
                 public void run() {
                     ctx.close(promise);

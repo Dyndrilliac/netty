@@ -14,6 +14,8 @@
  */
 package io.netty.handler.codec.http2;
 
+import io.netty.util.internal.UnstableApi;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
 
@@ -30,6 +32,7 @@ import static java.lang.Math.min;
  * fewer streams may be written to in each call to {@link #distribute(int, Writer)}, doing this
  * should improve the goodput on each written stream.
  */
+@UnstableApi
 public final class UniformStreamByteDistributor implements StreamByteDistributor {
     static final int DEFAULT_MIN_ALLOCATION_CHUNK = 1024;
 
@@ -146,7 +149,8 @@ public final class UniformStreamByteDistributor implements StreamByteDistributor
         }
 
         void updateStreamableBytes(int newStreamableBytes, boolean hasFrame, int windowSize) {
-            assert hasFrame || newStreamableBytes == 0;
+            assert hasFrame || newStreamableBytes == 0 :
+                "hasFrame: " + hasFrame + " newStreamableBytes: " + newStreamableBytes;
 
             int delta = newStreamableBytes - streamableBytes;
             if (delta != 0) {

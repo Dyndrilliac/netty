@@ -18,10 +18,12 @@ package io.netty.handler.codec.http2;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
+import io.netty.util.internal.UnstableApi;
 
 /**
  * Manager for the state of an HTTP/2 connection with the remote end-point.
  */
+@UnstableApi
 public interface Http2Connection {
     /**
      * Listener for life-cycle events for streams in this connection.
@@ -193,7 +195,6 @@ public interface Http2Connection {
          * <ul>
          * <li>The requested stream ID is not the next sequential ID for this endpoint.</li>
          * <li>The stream already exists.</li>
-         * <li>{@link #isExhausted()} is {@code true}</li>
          * <li>{@link #canOpenStream()} is {@code false}.</li>
          * <li>The connection is marked as going away.</li>
          * </ul>
@@ -231,12 +232,15 @@ public interface Http2Connection {
         boolean isServer();
 
         /**
-         * Sets whether server push is allowed to this endpoint.
+         * This is the <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_ENABLE_PUSH</a> value sent
+         * from the opposite endpoint. This method should only be called by Netty (not users) as a result of a
+         * receiving a {@code SETTINGS} frame.
          */
         void allowPushTo(boolean allow);
 
         /**
-         * Gets whether or not server push is allowed to this endpoint. This is always false
+         * This is the <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_ENABLE_PUSH</a> value sent
+         * from the opposite endpoint. The initial value must be {@code true} for the client endpoint and always false
          * for a server endpoint.
          */
         boolean allowPushTo();
@@ -249,17 +253,32 @@ public interface Http2Connection {
 
         /**
          * Gets the maximum number of streams (created by this endpoint) that are allowed to be active at
-         * the same time. This is the {@code SETTINGS_MAX_CONCURRENT_STREAMS} value sent from the opposite endpoint to
-         * restrict stream creation by this endpoint.
+         * the same time. This is the
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_CONCURRENT_STREAMS</a>
+         * value sent from the opposite endpoint to restrict stream creation by this endpoint.
+         * <p>
+         * The default value returned by this method must be "unlimited".
          */
         int maxActiveStreams();
 
         /**
-         * Sets the maximum number of streams (created by this endpoint) that are allowed to be active at once.
-         * This is the {@code SETTINGS_MAX_CONCURRENT_STREAMS} value sent from the opposite endpoint to
-         * restrict stream creation by this endpoint.
+         * The limit imposed by {@link #maxActiveStreams()} does not apply to streams in the IDLE state. Since IDLE
+         * streams can still consume resources this limit will include streams in all states.
+         * @return The maximum number of streams that can exist at any given time.
          */
-        void maxActiveStreams(int maxActiveStreams);
+        int maxStreams();
+
+        /**
+         * Sets the limit for {@code SETTINGS_MAX_CONCURRENT_STREAMS} and the limit for {@link #maxStreams()}.
+         * @param maxActiveStreams The maximum number of streams (created by this endpoint) that are allowed to be
+         * active at once. This is the
+         * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_CONCURRENT_STREAMS</a> value sent
+         * from the opposite endpoint to restrict stream creation by this endpoint.
+         * @param maxStreams The limit imposed by {@link #maxActiveStreams()} does not apply to streams in the IDLE
+         * state. Since IDLE streams can still consume resources this limit will include streams in all states.
+         * @throws Http2Exception if {@code maxStreams < maxActiveStream}.
+         */
+        void maxStreams(int maxActiveStreams, int maxStreams) throws Http2Exception;
 
         /**
          * Gets the ID of the stream last successfully created by this endpoint.

@@ -21,6 +21,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.DecoderResult;
+import io.netty.handler.codec.PrematureChannelClosureException;
 import io.netty.handler.codec.TooLongFrameException;
 import io.netty.util.ByteProcessor;
 import io.netty.util.internal.AppendableCharSequence;
@@ -279,7 +280,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             // Keep reading data as a chunk until the end of connection is reached.
             int toRead = Math.min(buffer.readableBytes(), maxChunkSize);
             if (toRead > 0) {
-                ByteBuf content = buffer.readSlice(toRead).retain();
+                ByteBuf content = buffer.readRetainedSlice(toRead);
                 out.add(new DefaultHttpContent(content));
             }
             return;
@@ -301,7 +302,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             if (toRead > chunkSize) {
                 toRead = (int) chunkSize;
             }
-            ByteBuf content = buffer.readSlice(toRead).retain();
+            ByteBuf content = buffer.readRetainedSlice(toRead);
             chunkSize -= toRead;
 
             if (chunkSize == 0) {
@@ -341,7 +342,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             if (toRead == 0) {
                 return;
             }
-            HttpContent chunk = new DefaultHttpContent(buffer.readSlice(toRead).retain());
+            HttpContent chunk = new DefaultHttpContent(buffer.readRetainedSlice(toRead));
             chunkSize -= toRead;
 
             out.add(chunk);
@@ -400,15 +401,30 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
     protected void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
         super.decodeLast(ctx, in, out);
 
+        if (resetRequested) {
+            // If a reset was requested by decodeLast() we need to do it now otherwise we may produce a
+            // LastHttpContent while there was already one.
+            resetNow();
+        }
         // Handle the last unfinished message.
         if (message != null) {
             boolean chunked = HttpUtil.isTransferEncodingChunked(message);
             if (currentState == State.READ_VARIABLE_LENGTH_CONTENT && !in.isReadable() && !chunked) {
                 // End of connection.
                 out.add(LastHttpContent.EMPTY_LAST_CONTENT);
-                reset();
+                resetNow();
                 return;
             }
+
+            if (currentState == State.READ_HEADER) {
+                // If we are still in the state of reading headers we need to create a new invalid message that
+                // signals that the connection was closed before we received the headers.
+                out.add(invalidMessage(Unpooled.EMPTY_BUFFER,
+                        new PrematureChannelClosureException("Connection closed before received headers")));
+                resetNow();
+                return;
+            }
+
             // Check if the closure of the connection signifies the end of the content.
             boolean prematureClosure;
             if (isDecodingRequest() || chunked) {
@@ -420,11 +436,11 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
                 // connection, so it is perfectly fine.
                 prematureClosure = contentLength() > 0;
             }
-            resetNow();
 
             if (!prematureClosure) {
                 out.add(LastHttpContent.EMPTY_LAST_CONTENT);
             }
+            resetNow();
         }
     }
 
@@ -493,6 +509,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             }
         }
 
+        resetRequested = false;
         currentState = State.SKIP_CONTROL_CHARS;
     }
 

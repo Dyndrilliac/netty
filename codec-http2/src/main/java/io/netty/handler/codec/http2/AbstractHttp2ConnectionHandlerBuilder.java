@@ -17,6 +17,7 @@
 package io.netty.handler.codec.http2;
 
 import io.netty.handler.codec.http2.Http2HeadersEncoder.SensitivityDetector;
+import io.netty.util.internal.UnstableApi;
 
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -57,6 +58,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  *   <li>{@link #frameLogger(Http2FrameLogger)}</li>
  *   <li>{@link #headerSensitivityDetector(SensitivityDetector)}</li>
  *   <li>{@link #encoderEnforceMaxConcurrentStreams(boolean)}</li>
+ *   <li>{@link #encoderIgnoreMaxHeaderListSize(boolean)}</li>
  * </ul>
  *
  * <h3>Exposing necessary methods in a subclass</h3>
@@ -66,6 +68,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * @param <T> The type of handler created by this builder.
  * @param <B> The concrete type of this builder.
  */
+@UnstableApi
 public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2ConnectionHandler,
                                                             B extends AbstractHttp2ConnectionHandlerBuilder<T, B>> {
 
@@ -95,6 +98,7 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     private Http2FrameLogger frameLogger;
     private SensitivityDetector headerSensitivityDetector;
     private Boolean encoderEnforceMaxConcurrentStreams;
+    private Boolean encoderIgnoreMaxHeaderListSize;
 
     /**
      * Sets the {@link Http2Settings} to use for the initial connection settings exchange.
@@ -300,6 +304,19 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
     }
 
     /**
+     * Sets if the <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>
+     * should be ignored when encoding headers.
+     * @param ignoreMaxHeaderListSize {@code true} to ignore
+     * <a href="https://tools.ietf.org/html/rfc7540#section-6.5.2">SETTINGS_MAX_HEADER_LIST_SIZE</a>.
+     * @return this.
+     */
+    protected B encoderIgnoreMaxHeaderListSize(boolean ignoreMaxHeaderListSize) {
+        enforceNonCodecConstraints("encoderIgnoreMaxHeaderListSize");
+        this.encoderIgnoreMaxHeaderListSize = ignoreMaxHeaderListSize;
+        return self();
+    }
+
+    /**
      * Create a new {@link Http2ConnectionHandler}.
      */
     protected T build() {
@@ -318,7 +335,9 @@ public abstract class AbstractHttp2ConnectionHandlerBuilder<T extends Http2Conne
 
     private T buildFromConnection(Http2Connection connection) {
         Http2FrameReader reader = new DefaultHttp2FrameReader(isValidateHeaders());
-        Http2FrameWriter writer = new DefaultHttp2FrameWriter(headerSensitivityDetector());
+        Http2FrameWriter writer = encoderIgnoreMaxHeaderListSize == null ?
+                new DefaultHttp2FrameWriter(headerSensitivityDetector()) :
+                new DefaultHttp2FrameWriter(headerSensitivityDetector(), encoderIgnoreMaxHeaderListSize);
 
         if (frameLogger != null) {
             reader = new Http2InboundFrameLogger(reader, frameLogger);

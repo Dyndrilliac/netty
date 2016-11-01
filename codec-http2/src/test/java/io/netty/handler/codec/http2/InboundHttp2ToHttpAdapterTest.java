@@ -118,9 +118,9 @@ public class InboundHttp2ToHttpAdapterTest {
             serverChannel.close().sync();
             serverChannel = null;
         }
-        Future<?> serverGroup = sb.group().shutdownGracefully(0, 0, MILLISECONDS);
-        Future<?> serverChildGroup = sb.childGroup().shutdownGracefully(0, 0, MILLISECONDS);
-        Future<?> clientGroup = cb.group().shutdownGracefully(0, 0, MILLISECONDS);
+        Future<?> serverGroup = sb.config().group().shutdownGracefully(0, 0, MILLISECONDS);
+        Future<?> serverChildGroup = sb.config().childGroup().shutdownGracefully(0, 0, MILLISECONDS);
+        Future<?> clientGroup = cb.config().group().shutdownGracefully(0, 0, MILLISECONDS);
         serverGroup.sync();
         serverChildGroup.sync();
         clientGroup.sync();
@@ -140,6 +140,7 @@ public class InboundHttp2ToHttpAdapterTest {
             httpHeaders.set(HttpHeaderNames.HOST, "example.org");
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).
                     scheme(new AsciiString("https")).authority(new AsciiString("example.org"))
                     .path(new AsciiString("/some/path/resource2"));
@@ -172,6 +173,7 @@ public class InboundHttp2ToHttpAdapterTest {
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
             httpHeaders.set(HttpHeaderNames.COOKIE, "a=b; c=d; e=f");
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).
                     scheme(new AsciiString("https")).authority(new AsciiString("example.org"))
                     .path(new AsciiString("/some/path/resource2"))
@@ -207,6 +209,7 @@ public class InboundHttp2ToHttpAdapterTest {
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
             httpHeaders.set(HttpHeaderNames.COOKIE, "a=b; c=d; e=f");
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).
                     scheme(new AsciiString("https")).authority(new AsciiString("example.org"))
                     .path(new AsciiString("/some/path/resource2"))
@@ -261,13 +264,14 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).path(
                     new AsciiString("/some/path/resource2"));
             runInChannel(clientChannel, new Http2Runnable() {
                 @Override
                 public void run() {
                     clientHandler.encoder().writeHeaders(ctxClient(), 3, http2Headers, 0, false, newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3, content.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 3, content.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
                     clientChannel.flush();
                 }
@@ -293,6 +297,7 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).path(
                     new AsciiString("/some/path/resource2"));
             final int midPoint = text.length() / 2;
@@ -300,10 +305,11 @@ public class InboundHttp2ToHttpAdapterTest {
                 @Override
                 public void run() {
                     clientHandler.encoder().writeHeaders(ctxClient(), 3, http2Headers, 0, false, newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3, content.slice(0, midPoint).retain(), 0, false,
-                            newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3,
-                            content.slice(midPoint, text.length() - midPoint).retain(), 0, true, newPromiseClient());
+                    clientHandler.encoder().writeData(
+                            ctxClient(), 3, content.retainedSlice(0, midPoint), 0, false, newPromiseClient());
+                    clientHandler.encoder().writeData(
+                            ctxClient(), 3, content.retainedSlice(midPoint, text.length() - midPoint),
+                            0, true, newPromiseClient());
                     clientChannel.flush();
                 }
             });
@@ -328,6 +334,7 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("GET")).path(
                     new AsciiString("/some/path/resource2"));
             runInChannel(clientChannel, new Http2Runnable() {
@@ -363,6 +370,7 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             HttpHeaders trailingHeaders = request.trailingHeaders();
             trailingHeaders.set(of("FoO"), of("goo"));
             trailingHeaders.set(of("foO2"), of("goo2"));
@@ -403,6 +411,7 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             HttpHeaders trailingHeaders = request.trailingHeaders();
             trailingHeaders.set(of("Foo"), of("goo"));
             trailingHeaders.set(of("fOo2"), of("goo2"));
@@ -417,7 +426,7 @@ public class InboundHttp2ToHttpAdapterTest {
                 @Override
                 public void run() {
                     clientHandler.encoder().writeHeaders(ctxClient(), 3, http2Headers, 0, false, newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3, content.duplicate().retain(), 0, false,
+                    clientHandler.encoder().writeData(ctxClient(), 3, content.retainedDuplicate(), 0, false,
                                                       newPromiseClient());
                     clientHandler.encoder().writeHeaders(ctxClient(), 3, http2Headers2, 0, true, newPromiseClient());
                     clientChannel.flush();
@@ -448,10 +457,11 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             HttpHeaders httpHeaders2 = request2.headers();
             httpHeaders2.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 5);
             httpHeaders2.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_DEPENDENCY_ID.text(), 3);
-            httpHeaders2.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), 123);
+            httpHeaders2.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 123);
             httpHeaders2.setInt(HttpHeaderNames.CONTENT_LENGTH, text2.length());
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("PUT")).path(
                     new AsciiString("/some/path/resource"));
@@ -464,9 +474,9 @@ public class InboundHttp2ToHttpAdapterTest {
                     clientHandler.encoder().writeHeaders(ctxClient(), 5, http2Headers2, 0, false, newPromiseClient());
                     clientChannel.flush(); // Headers are queued in the flow controller and so flush them.
                     clientHandler.encoder().writePriority(ctxClient(), 5, 3, (short) 123, true, newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3, content.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 3, content.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 5, content2.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 5, content2.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
                     clientChannel.flush();
                 }
@@ -501,9 +511,11 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             HttpHeaders httpHeaders2 = request2.headers();
             httpHeaders2.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 5);
             httpHeaders2.setInt(HttpHeaderNames.CONTENT_LENGTH, text2.length());
+            httpHeaders2.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("PUT")).path(
                     new AsciiString("/some/path/resource"));
             final Http2Headers http2Headers2 = new DefaultHttp2Headers().method(new AsciiString("PUT")).path(
@@ -511,16 +523,16 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders3 = request3.headers();
             httpHeaders3.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 5);
             httpHeaders3.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_DEPENDENCY_ID.text(), 3);
-            httpHeaders3.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), 222);
+            httpHeaders3.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 222);
             httpHeaders3.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
             runInChannel(clientChannel, new Http2Runnable() {
                 @Override
                 public void run() {
                     clientHandler.encoder().writeHeaders(ctxClient(), 3, http2Headers, 0, false, newPromiseClient());
                     clientHandler.encoder().writeHeaders(ctxClient(), 5, http2Headers2, 0, false, newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 3, content.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 3, content.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
-                    clientHandler.encoder().writeData(ctxClient(), 5, content2.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 5, content2.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
                     clientChannel.flush(); // headers and data are queued in the flow controller, so flush them.
                     clientHandler.encoder().writePriority(ctxClient(), 5, 3, (short) 222, false, newPromiseClient());
@@ -558,6 +570,7 @@ public class InboundHttp2ToHttpAdapterTest {
             HttpHeaders httpHeaders = response.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, text.length());
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             HttpHeaders httpHeaders2 = response2.headers();
             httpHeaders2.set(HttpConversionUtil.ExtensionHeaderNames.SCHEME.text(), "https");
             httpHeaders2.set(HttpHeaderNames.HOST, "example.org");
@@ -568,6 +581,7 @@ public class InboundHttp2ToHttpAdapterTest {
             httpHeaders = request.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
             final Http2Headers http2Headers3 = new DefaultHttp2Headers().method(new AsciiString("GET"))
                     .path(new AsciiString("/push/test"));
             runInChannel(clientChannel, new Http2Runnable() {
@@ -592,9 +606,9 @@ public class InboundHttp2ToHttpAdapterTest {
                 public void run() {
                     serverHandler.encoder().writeHeaders(ctxServer(), 3, http2Headers, 0, false, newPromiseServer());
                     serverHandler.encoder().writePushPromise(ctxServer(), 3, 2, http2Headers2, 0, newPromiseServer());
-                    serverHandler.encoder().writeData(ctxServer(), 3, content.duplicate().retain(), 0, true,
+                    serverHandler.encoder().writeData(ctxServer(), 3, content.retainedDuplicate(), 0, true,
                                                       newPromiseServer());
-                    serverHandler.encoder().writeData(ctxServer(), 5, content2.duplicate().retain(), 0, true,
+                    serverHandler.encoder().writeData(ctxServer(), 5, content2.retainedDuplicate(), 0, true,
                                                       newPromiseServer());
                     serverConnectedChannel.flush();
                 }
@@ -620,6 +634,8 @@ public class InboundHttp2ToHttpAdapterTest {
         httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
         httpHeaders.set(HttpHeaderNames.EXPECT, HttpHeaderValues.CONTINUE);
         httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+        httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
+
         final Http2Headers http2Headers = new DefaultHttp2Headers().method(new AsciiString("PUT"))
                 .path(new AsciiString("/info/test"))
                 .set(new AsciiString(HttpHeaderNames.EXPECT.toString()),
@@ -627,7 +643,7 @@ public class InboundHttp2ToHttpAdapterTest {
         final FullHttpMessage response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE);
         final String text = "a big payload";
         final ByteBuf payload = Unpooled.copiedBuffer(text.getBytes());
-        final FullHttpMessage request2 = request.copy(payload);
+        final FullHttpMessage request2 = request.replace(payload);
         final FullHttpMessage response2 = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
 
         try {
@@ -660,7 +676,7 @@ public class InboundHttp2ToHttpAdapterTest {
             runInChannel(clientChannel, new Http2Runnable() {
                 @Override
                 public void run() {
-                    clientHandler.encoder().writeData(ctxClient(), 3, payload.duplicate().retain(), 0, true,
+                    clientHandler.encoder().writeData(ctxClient(), 3, payload.retainedDuplicate(), 0, true,
                                                       newPromiseClient());
                     clientChannel.flush();
                 }
@@ -670,6 +686,8 @@ public class InboundHttp2ToHttpAdapterTest {
             httpHeaders = response2.headers();
             httpHeaders.setInt(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 3);
             httpHeaders.setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+            httpHeaders.setShort(HttpConversionUtil.ExtensionHeaderNames.STREAM_WEIGHT.text(), (short) 16);
+
             final Http2Headers http2HeadersResponse2 = new DefaultHttp2Headers().status(new AsciiString("200"));
             runInChannel(serverConnectedChannel, new Http2Runnable() {
                 @Override

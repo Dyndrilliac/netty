@@ -35,6 +35,7 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
     /**
      * @deprecated Use {@link #AbstractEpollServerChannel(Socket, boolean)}.
      */
+    @Deprecated
     protected AbstractEpollServerChannel(int fd) {
         this(new Socket(fd), false);
     }
@@ -52,7 +53,7 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
      */
     @Deprecated
     protected AbstractEpollServerChannel(Socket fd) {
-        this(fd, fd.getSoError() == 0);
+        this(fd, isSoErrorZero(fd));
     }
 
     protected AbstractEpollServerChannel(Socket fd, boolean active) {
@@ -107,19 +108,16 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
         void epollInReady() {
             assert eventLoop().inEventLoop();
             if (fd().isInputShutdown()) {
-                return;
-            }
-            final EpollRecvByteAllocatorHandle allocHandle = recvBufAllocHandle();
-            allocHandle.edgeTriggered(isFlagSet(Native.EPOLLET));
-            final ChannelConfig config = config();
-            if (!readPending && !allocHandle.isEdgeTriggered() && !config.isAutoRead()) {
-                // ChannelConfig.setAutoRead(false) was called in the meantime
                 clearEpollIn0();
                 return;
             }
+            final ChannelConfig config = config();
+            final EpollRecvByteAllocatorHandle allocHandle = recvBufAllocHandle();
+            allocHandle.edgeTriggered(isFlagSet(Native.EPOLLET));
 
             final ChannelPipeline pipeline = pipeline();
             allocHandle.reset(config);
+            epollInBefore();
 
             Throwable exception = null;
             try {
@@ -129,7 +127,6 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
                         // EpollRecvByteAllocatorHandle knows if it should try to read again or not when autoRead is
                         // enabled.
                         allocHandle.lastBytesRead(fd().accept(acceptedAddress));
-                        epollInReadAttempted();
                         if (allocHandle.lastBytesRead() == -1) {
                             // this means everything was handled for now
                             break;
@@ -137,18 +134,17 @@ public abstract class AbstractEpollServerChannel extends AbstractEpollChannel im
                         allocHandle.incMessagesRead(1);
 
                         int len = acceptedAddress[0];
+                        readPending = false;
                         pipeline.fireChannelRead(newChildChannel(allocHandle.lastBytesRead(), acceptedAddress, 1, len));
                     } while (allocHandle.continueReading());
                 } catch (Throwable t) {
                     exception = t;
                 }
                 allocHandle.readComplete();
-                maybeMoreDataToRead = allocHandle.maybeMoreDataToRead();
                 pipeline.fireChannelReadComplete();
 
                 if (exception != null) {
                     pipeline.fireExceptionCaught(exception);
-                    checkResetEpollIn(allocHandle.isEdgeTriggered());
                 }
             } finally {
                 epollInFinally(config);

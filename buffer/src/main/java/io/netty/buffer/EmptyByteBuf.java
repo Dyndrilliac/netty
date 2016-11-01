@@ -96,6 +96,16 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf asReadOnly() {
+        return Unpooled.unmodifiableBuffer(this);
+    }
+
+    @Override
+    public boolean isReadOnly() {
+        return false;
+    }
+
+    @Override
     public boolean isDirect() {
         return true;
     }
@@ -382,6 +392,12 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public CharSequence getCharSequence(int index, int length, Charset charset) {
+        checkIndex(index, length);
+        return null;
+    }
+
+    @Override
     public ByteBuf setBoolean(int index, boolean value) {
         throw new IndexOutOfBoundsException();
     }
@@ -500,6 +516,11 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public int setCharSequence(int index, CharSequence sequence, Charset charset) {
+        throw new IndexOutOfBoundsException();
+    }
+
+    @Override
     public boolean readBoolean() {
         throw new IndexOutOfBoundsException();
     }
@@ -610,6 +631,11 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf readRetainedSlice(int length) {
+        return checkLength(length);
+    }
+
+    @Override
     public ByteBuf readBytes(ByteBuf dst) {
         return checkLength(dst.writableBytes());
     }
@@ -654,6 +680,12 @@ public final class EmptyByteBuf extends ByteBuf {
     public int readBytes(FileChannel out, long position, int length) {
         checkLength(length);
         return 0;
+    }
+
+    @Override
+    public CharSequence readCharSequence(int length, Charset charset) {
+        checkLength(length);
+        return null;
     }
 
     @Override
@@ -780,6 +812,11 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public int writeCharSequence(CharSequence sequence, Charset charset) {
+        throw new IndexOutOfBoundsException();
+    }
+
+    @Override
     public int indexOf(int fromIndex, int toIndex, byte value) {
         checkIndex(fromIndex);
         checkIndex(toIndex);
@@ -841,12 +878,27 @@ public final class EmptyByteBuf extends ByteBuf {
     }
 
     @Override
+    public ByteBuf retainedSlice() {
+        return this;
+    }
+
+    @Override
     public ByteBuf slice(int index, int length) {
         return checkIndex(index, length);
     }
 
     @Override
+    public ByteBuf retainedSlice(int index, int length) {
+        return checkIndex(index, length);
+    }
+
+    @Override
     public ByteBuf duplicate() {
+        return this;
+    }
+
+    @Override
+    public ByteBuf retainedDuplicate() {
         return this;
     }
 

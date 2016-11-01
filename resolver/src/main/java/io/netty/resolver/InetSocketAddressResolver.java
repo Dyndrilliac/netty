@@ -30,7 +30,7 @@ import java.util.List;
  */
 public class InetSocketAddressResolver extends AbstractAddressResolver<InetSocketAddress> {
 
-    private final NameResolver<InetAddress> nameResolver;
+    final NameResolver<InetAddress> nameResolver;
 
     /**
      * @param executor the {@link EventExecutor} which is used to notify the listeners of the {@link Future} returned
@@ -87,5 +87,10 @@ public class InetSocketAddressResolver extends AbstractAddressResolver<InetSocke
                         }
                     }
                 });
+    }
+
+    @Override
+    public void close() {
+        nameResolver.close();
     }
 }

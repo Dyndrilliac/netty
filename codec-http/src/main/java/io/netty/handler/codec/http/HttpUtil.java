@@ -184,7 +184,11 @@ public final class HttpUtil {
     public static long getContentLength(HttpMessage message, long defaultValue) {
         String value = message.headers().get(HttpHeaderNames.CONTENT_LENGTH);
         if (value != null) {
-            return Long.parseLong(value);
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException ignore) {
+                return defaultValue;
+            }
         }
 
         // We know the content length if it's a Web Socket message even if
@@ -276,7 +280,7 @@ public final class HttpUtil {
 
     /**
      * Sets or removes the {@code "Expect: 100-continue"} header to / from the
-     * specified message. If the specified {@code value} is {@code true},
+     * specified message. If {@code expected} is {@code true},
      * the {@code "Expect: 100-continue"} header is set and all other previous
      * {@code "Expect"} headers are removed.  Otherwise, all {@code "Expect"}
      * headers are removed completely.

@@ -77,7 +77,7 @@ final class PoolThreadCache {
         }
         if (freeSweepAllocationThreshold < 1) {
             throw new IllegalArgumentException("freeSweepAllocationThreshold: "
-                    + maxCachedBufferCapacity + " (expected: > 0)");
+                    + freeSweepAllocationThreshold + " (expected: > 0)");
         }
         this.freeSweepAllocationThreshold = freeSweepAllocationThreshold;
         this.heapArena = heapArena;
@@ -91,6 +91,8 @@ final class PoolThreadCache {
             numShiftsNormalDirect = log2(directArena.pageSize);
             normalDirectCaches = createNormalCaches(
                     normalCacheSize, maxCachedBufferCapacity, directArena);
+
+            directArena.numThreadCaches.getAndIncrement();
         } else {
             // No directArea is configured so just null out all caches
             tinySubPageDirectCaches = null;
@@ -108,6 +110,8 @@ final class PoolThreadCache {
             numShiftsNormalHeap = log2(heapArena.pageSize);
             normalHeapCaches = createNormalCaches(
                     normalCacheSize, maxCachedBufferCapacity, heapArena);
+
+            heapArena.numThreadCaches.getAndIncrement();
         } else {
             // No heapArea is configured so just null out all caches
             tinySubPageHeapCaches = null;
@@ -242,6 +246,14 @@ final class PoolThreadCache {
         if (numFreed > 0 && logger.isDebugEnabled()) {
             logger.debug("Freed {} thread-local buffer(s) from thread: {}", numFreed, thread.getName());
         }
+
+        if (directArena != null) {
+            directArena.numThreadCaches.getAndDecrement();
+        }
+
+        if (heapArena != null) {
+            heapArena.numThreadCaches.getAndDecrement();
+        }
     }
 
     private static int free(MemoryRegionCache<?>[] caches) {
@@ -357,7 +369,7 @@ final class PoolThreadCache {
         private int allocations;
 
         MemoryRegionCache(int size, SizeClass sizeClass) {
-            this.size = MathUtil.findNextPositivePowerOfTwo(size);
+            this.size = MathUtil.safeFindNextPositivePowerOfTwo(size);
             queue = PlatformDependent.newFixedMpscQueue(this.size);
             this.sizeClass = sizeClass;
         }
@@ -445,18 +457,18 @@ final class PoolThreadCache {
         }
 
         static final class Entry<T> {
-            final Handle recyclerHandle;
+            final Handle<Entry<?>> recyclerHandle;
             PoolChunk<T> chunk;
             long handle = -1;
 
-            Entry(Handle recyclerHandle) {
+            Entry(Handle<Entry<?>> recyclerHandle) {
                 this.recyclerHandle = recyclerHandle;
             }
 
             void recycle() {
                 chunk = null;
                 handle = -1;
-                RECYCLER.recycle(this, recyclerHandle);
+                recyclerHandle.recycle(this);
             }
         }
 
@@ -470,8 +482,9 @@ final class PoolThreadCache {
 
         @SuppressWarnings("rawtypes")
         private static final Recycler<Entry> RECYCLER = new Recycler<Entry>() {
+            @SuppressWarnings("unchecked")
             @Override
-            protected Entry newObject(Handle handle) {
+            protected Entry newObject(Handle<Entry> handle) {
                 return new Entry(handle);
             }
         };
